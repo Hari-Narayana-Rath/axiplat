@@ -37,6 +37,7 @@ app = Flask(__name__)
 MODEL_DIR = os.path.join(os.getcwd(), "model")
 AGE_PROTO = os.path.join(MODEL_DIR, "deploy_age.prototxt")
 AGE_CAFFE = os.path.join(MODEL_DIR, "age_net.caffemodel")
+FACE_EMBED_MODEL = os.path.join(MODEL_DIR, "mobilefacenet.onnx")
 USERS_FILE = os.path.join(os.getcwd(), "users.json")
 AGE_LIST = ['(0-2)','(4-6)','(8-12)','(15-20)','(25-32)','(38-43)','(48-53)','(60-100)']
 # Numeric midpoint for each group (used to convert soft outputs to numeric age)
@@ -56,11 +57,34 @@ CAMERA_INDEX = 0
 DNN_CONFIDENCE_LOCK = 0.55  # if the top class is confident enough, snap to that age bucket
 CALIBRATION_SCALE = float(os.environ.get("AGE_CALIBRATION_SCALE", "1.0"))
 CALIBRATION_OFFSET = float(os.environ.get("AGE_CALIBRATION_OFFSET", "0.0"))
-if FACE_BACKEND == "dlib":
-    EMBEDDING_THRESHOLD = float(os.environ.get("AGE_MATCH_THRESHOLD", "0.52"))
-else:
-    # MediaPipe landmark vectors are normalized; tighter threshold
-    EMBEDDING_THRESHOLD = float(os.environ.get("AGE_MATCH_THRESHOLD", "0.08"))
+
+ONNX_SESSION = None
+if FACE_BACKEND != "dlib":
+    try:
+        import onnxruntime as ort  # type: ignore
+
+        if os.path.isfile(FACE_EMBED_MODEL):
+            ONNX_SESSION = ort.InferenceSession(
+                FACE_EMBED_MODEL,
+                providers=["CPUExecutionProvider"]
+            )
+            FACE_BACKEND = "onnx"
+            print("Loaded MobileFaceNet ONNX embeddings.")
+        else:
+            print("MobileFaceNet ONNX model not found; using landmark fallback.")
+    except Exception as e:
+        print("ONNX Runtime not available:", e)
+        ONNX_SESSION = None
+
+DEFAULT_THRESHOLDS = {
+    "dlib": "0.52",
+    "onnx": "1.0",
+    "landmark": "0.08"
+}
+EMBEDDING_THRESHOLD = float(os.environ.get(
+    "AGE_MATCH_THRESHOLD",
+    DEFAULT_THRESHOLDS.get(FACE_BACKEND, "0.52")
+))
 
 # ---------------------------
 # Load models
@@ -156,6 +180,26 @@ def landmark_descriptor(landmarks):
     return np.array(coords, dtype="float32")
 
 
+def embed_face_onnx(face_img):
+    if ONNX_SESSION is None:
+        return None
+    try:
+        img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (112, 112))
+        img = img.astype("float32") / 255.0
+        img = np.transpose(img, (2, 0, 1))
+        img = np.expand_dims(img, axis=0)
+        input_name = ONNX_SESSION.get_inputs()[0].name
+        outputs = ONNX_SESSION.run(None, {input_name: img})
+        emb = outputs[0][0]
+        norm = np.linalg.norm(emb)
+        if norm > 0:
+            emb = emb / norm
+        return emb
+    except Exception:
+        return None
+
+
 def embed_face(face_img, landmarks=None):
     if FACE_BACKEND == "dlib" and face_recognition is not None:
         try:
@@ -166,6 +210,9 @@ def embed_face(face_img, landmarks=None):
         except Exception:
             return None
         return None
+
+    if FACE_BACKEND == "onnx" and ONNX_SESSION is not None:
+        return embed_face_onnx(face_img)
 
     # Landmark fallback
     if landmarks is None:
@@ -436,7 +483,8 @@ def status():
         "access_allowed": access_allowed,
         "camera_error": camera_error,
         "recognized_user": recognized_user,
-        "face_recognition": FACE_REC_AVAILABLE
+        "face_recognition": FACE_REC_AVAILABLE,
+        "face_backend": FACE_BACKEND
     })
 
 @app.route('/insta')
