@@ -18,13 +18,16 @@ try:
 except Exception:
     TF_AVAILABLE = False
 
-# Optional face recognition for identity embeddings
+# Identity embedding backend
 try:
-    import face_recognition
+    import face_recognition  # type: ignore
 
+    FACE_BACKEND = "dlib"  # dlib encodings
     FACE_REC_AVAILABLE = True
 except Exception:
-    FACE_REC_AVAILABLE = False
+    face_recognition = None
+    FACE_BACKEND = "landmark"  # MediaPipe landmark vector
+    FACE_REC_AVAILABLE = True  # still provide recognition via landmarks
 
 app = Flask(__name__)
 
@@ -53,7 +56,11 @@ CAMERA_INDEX = 0
 DNN_CONFIDENCE_LOCK = 0.55  # if the top class is confident enough, snap to that age bucket
 CALIBRATION_SCALE = float(os.environ.get("AGE_CALIBRATION_SCALE", "1.0"))
 CALIBRATION_OFFSET = float(os.environ.get("AGE_CALIBRATION_OFFSET", "0.0"))
-EMBEDDING_THRESHOLD = float(os.environ.get("AGE_MATCH_THRESHOLD", "0.52"))
+if FACE_BACKEND == "dlib":
+    EMBEDDING_THRESHOLD = float(os.environ.get("AGE_MATCH_THRESHOLD", "0.52"))
+else:
+    # MediaPipe landmark vectors are normalized; tighter threshold
+    EMBEDDING_THRESHOLD = float(os.environ.get("AGE_MATCH_THRESHOLD", "0.08"))
 
 # ---------------------------
 # Load models
@@ -132,7 +139,9 @@ def save_users(users):
             continue
         serializable[uid] = {
             "name": entry.get("name"),
-            "embedding": entry.get("embedding")
+            "embedding": entry.get("embedding"),
+            "last_age": entry.get("last_age"),
+            "created_at": entry.get("created_at")
         }
     tmp = os.path.join(os.path.dirname(USERS_FILE), "_users.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -140,17 +149,31 @@ def save_users(users):
     os.replace(tmp, USERS_FILE)
 
 
-def embed_face(face_img):
-    if not FACE_REC_AVAILABLE:
+def landmark_descriptor(landmarks):
+    coords = []
+    for lm in landmarks.landmark:
+        coords.extend([lm.x, lm.y, lm.z])
+    return np.array(coords, dtype="float32")
+
+
+def embed_face(face_img, landmarks=None):
+    if FACE_BACKEND == "dlib" and face_recognition is not None:
+        try:
+            rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+            encodings = face_recognition.face_encodings(rgb, num_jitters=1)
+            if encodings:
+                return encodings[0]
+        except Exception:
+            return None
+        return None
+
+    # Landmark fallback
+    if landmarks is None:
         return None
     try:
-        rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-        encodings = face_recognition.face_encodings(rgb, num_jitters=1)
-        if encodings:
-            return encodings[0]
+        return landmark_descriptor(landmarks)
     except Exception:
         return None
-    return None
 
 
 def match_user(embedding):
@@ -178,8 +201,9 @@ def match_user(embedding):
             best_dist = dist
             best_id = uid
             best_name = entry.get("name")
+            best_age = entry.get("last_age")
     if best_id and best_dist is not None and best_dist <= EMBEDDING_THRESHOLD:
-        return {"id": best_id, "name": best_name, "distance": float(best_dist)}
+        return {"id": best_id, "name": best_name, "last_age": best_age, "distance": float(best_dist)}
     return None
 
 
@@ -324,7 +348,7 @@ def gen_frames():
                 cnn_age=cnn_regression_age(face) if age_cnn_model else None
 
                 if current_embedding is None:
-                    emb=embed_face(face)
+                    emb=embed_face(face, lm)
                     if emb is not None:
                         current_embedding=emb
 
@@ -437,7 +461,9 @@ def enroll_user():
     user_id = data.get("user_id") or str(uuid.uuid4())
     profile = {
         "name": name,
-        "embedding": latest_embedding
+        "embedding": latest_embedding,
+        "last_age": None if final_median_age is None else float(final_median_age),
+        "created_at": time.time()
     }
 
     with users_lock:
@@ -448,7 +474,12 @@ def enroll_user():
         except Exception as exc:
             return jsonify({"error": f"failed to save user: {exc}"}), 500
 
-    recognized_user = {"id": user_id, "name": name, "distance": 0.0}
+    recognized_user = {
+        "id": user_id,
+        "name": name,
+        "last_age": profile["last_age"],
+        "distance": 0.0
+    }
     return jsonify({"ok": True, "user": recognized_user})
 
 if __name__ == "__main__":
