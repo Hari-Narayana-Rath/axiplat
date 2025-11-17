@@ -1,7 +1,6 @@
 // Age Gate Extension - Background Service Worker
 const GATE_URL = 'http://localhost:5000';
 const INSTAGRAM_DOMAINS = ['www.instagram.com', 'instagram.com'];
-const CHECKED_KEY = 'age_gate_checked_once';
 
 // Check if server is running
 async function isServerRunning() {
@@ -48,15 +47,7 @@ async function isVerified() {
 
 // Check verification once on browser start
 async function checkOnceOnStart() {
-  const result = await chrome.storage.local.get([CHECKED_KEY, 'age_gate_token']);
-  
-  // Only check once per browser session
-  if (result[CHECKED_KEY]) {
-    return;
-  }
-  
-  // Mark as checked
-  chrome.storage.local.set({ [CHECKED_KEY]: true });
+  const result = await chrome.storage.local.get(['age_gate_token']);
   
   // Check if verified
   const verified = await isVerified();
@@ -67,9 +58,6 @@ async function checkOnceOnStart() {
       if (tabs.length > 0) {
         // Redirect existing Instagram tab
         chrome.tabs.update(tabs[0].id, { url: GATE_URL });
-      } else {
-        // Create new tab with age gate
-        chrome.tabs.create({ url: GATE_URL });
       }
     });
   }
@@ -78,7 +66,7 @@ async function checkOnceOnStart() {
 // Run check once when extension starts
 checkOnceOnStart();
 
-// Intercept Instagram navigation - only if not verified
+// Intercept Instagram navigation - ALWAYS block if not verified
 chrome.webRequest.onBeforeRequest.addListener(
   async function(details) {
     const url = new URL(details.url);
@@ -90,20 +78,36 @@ chrome.webRequest.onBeforeRequest.addListener(
       const verified = await isVerified();
       
       if (!verified) {
-        // Check if we already checked once
-        const result = await chrome.storage.local.get([CHECKED_KEY]);
-        if (!result[CHECKED_KEY]) {
-          // First time - redirect to age gate
-          chrome.storage.local.set({ [CHECKED_KEY]: true });
-          return { redirectUrl: GATE_URL };
-        }
-        // Already checked once, allow access (user can manually go to age gate)
+        // Always redirect to age gate if not verified
+        return { redirectUrl: GATE_URL };
       }
     }
   },
   { urls: ["https://www.instagram.com/*", "https://instagram.com/*"] },
   ["blocking"]
 );
+
+// Also listen for tab updates to catch navigation
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading' && tab.url) {
+    try {
+      const url = new URL(tab.url);
+      
+      if (INSTAGRAM_DOMAINS.includes(url.hostname) && 
+          (url.pathname === '/' || url.pathname.startsWith('/accounts/') || url.pathname.startsWith('/explore'))) {
+        
+        const verified = await isVerified();
+        
+        if (!verified) {
+          // Redirect to age gate
+          chrome.tabs.update(tabId, { url: GATE_URL });
+        }
+      }
+    } catch (e) {
+      // Invalid URL, ignore
+    }
+  }
+});
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -122,14 +126,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'clearToken') {
-    chrome.storage.local.remove(['age_gate_token', CHECKED_KEY], () => {
-      sendResponse({ success: true });
-    });
-    return true;
-  }
-  
-  if (request.action === 'resetCheck') {
-    chrome.storage.local.remove(CHECKED_KEY, () => {
+    chrome.storage.local.remove('age_gate_token', () => {
       sendResponse({ success: true });
     });
     return true;

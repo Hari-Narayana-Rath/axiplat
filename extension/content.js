@@ -6,11 +6,8 @@
   const token = localStorage.getItem('age_gate_token');
   
   if (token) {
-    // Store token in extension storage and reset check flag
-    chrome.storage.local.set({ 
-      age_gate_token: token,
-      age_gate_checked_once: false  // Reset so it can check again if needed
-    }, () => {
+    // Store token in extension storage
+    chrome.storage.local.set({ age_gate_token: token }, () => {
       console.log('Age gate token stored in extension');
     });
   }
