@@ -28,6 +28,8 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+> **Note:** The `face-recognition` package requires dlib. On Windows install the [Visual C++ build tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and ensure CMake is available; on macOS/Linux make sure you have a working C/C++ toolchain.
+
 ## Run the App
 
 ```bash

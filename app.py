@@ -1,15 +1,15 @@
-import os
-import time
-import re
-import math
 import json
+import math
+import os
+import re
+import time
+import uuid
 from threading import Lock
 
 import cv2
-import numpy as np
-from flask import Flask, render_template, Response, jsonify
-
 import mediapipe as mp
+import numpy as np
+from flask import Flask, render_template, Response, jsonify, request
 
 # Optional tensorflow for CNN regression (numeric age)
 try:
@@ -17,6 +17,14 @@ try:
     TF_AVAILABLE = True
 except Exception:
     TF_AVAILABLE = False
+
+# Optional face recognition for identity embeddings
+try:
+    import face_recognition
+
+    FACE_REC_AVAILABLE = True
+except Exception:
+    FACE_REC_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -26,6 +34,7 @@ app = Flask(__name__)
 MODEL_DIR = os.path.join(os.getcwd(), "model")
 AGE_PROTO = os.path.join(MODEL_DIR, "deploy_age.prototxt")
 AGE_CAFFE = os.path.join(MODEL_DIR, "age_net.caffemodel")
+USERS_FILE = os.path.join(os.getcwd(), "users.json")
 AGE_LIST = ['(0-2)','(4-6)','(8-12)','(15-20)','(25-32)','(38-43)','(48-53)','(60-100)']
 # Numeric midpoint for each group (used to convert soft outputs to numeric age)
 AGE_MIDPOINTS = [ (int(a.split('(')[1].split('-')[0]) + int(a.split('-')[1].split(')')[0]))/2.0 for a in AGE_LIST ]
@@ -44,6 +53,7 @@ CAMERA_INDEX = 0
 DNN_CONFIDENCE_LOCK = 0.55  # if the top class is confident enough, snap to that age bucket
 CALIBRATION_SCALE = float(os.environ.get("AGE_CALIBRATION_SCALE", "1.0"))
 CALIBRATION_OFFSET = float(os.environ.get("AGE_CALIBRATION_OFFSET", "0.0"))
+EMBEDDING_THRESHOLD = float(os.environ.get("AGE_MATCH_THRESHOLD", "0.52"))
 
 # ---------------------------
 # Load models
@@ -88,6 +98,7 @@ face_mesh = mp_face_mesh.FaceMesh(
 # Camera & state
 # ---------------------------
 lock = Lock()
+users_lock = Lock()
 
 latest_ema_age = None
 sampled_ages = []
@@ -96,6 +107,81 @@ final_age_group = None
 access_allowed = False
 stream_active = False
 camera_error = None
+recognized_user = None
+latest_embedding = None
+# ---------------------------
+# User storage helpers
+# ---------------------------
+def load_users():
+    if not os.path.isfile(USERS_FILE):
+        return {}
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def save_users(users):
+    serializable = {}
+    for uid, entry in users.items():
+        if not isinstance(entry, dict):
+            continue
+        serializable[uid] = {
+            "name": entry.get("name"),
+            "embedding": entry.get("embedding")
+        }
+    tmp = os.path.join(os.path.dirname(USERS_FILE), "_users.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(serializable, f, indent=2)
+    os.replace(tmp, USERS_FILE)
+
+
+def embed_face(face_img):
+    if not FACE_REC_AVAILABLE:
+        return None
+    try:
+        rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+        encodings = face_recognition.face_encodings(rgb, num_jitters=1)
+        if encodings:
+            return encodings[0]
+    except Exception:
+        return None
+    return None
+
+
+def match_user(embedding):
+    if embedding is None or not FACE_REC_AVAILABLE:
+        return None
+    try:
+        probe = np.array(embedding)
+    except Exception:
+        return None
+    with users_lock:
+        users = load_users()
+    best_id = None
+    best_name = None
+    best_dist = None
+    for uid, entry in users.items():
+        stored = entry.get("embedding")
+        if not stored:
+            continue
+        try:
+            stored_vec = np.array(stored)
+        except Exception:
+            continue
+        dist = np.linalg.norm(probe - stored_vec)
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best_id = uid
+            best_name = entry.get("name")
+    if best_id and best_dist is not None and best_dist <= EMBEDDING_THRESHOLD:
+        return {"id": best_id, "name": best_name, "distance": float(best_dist)}
+    return None
+
 
 # ---------------------------
 # Helpers
@@ -182,7 +268,7 @@ def group_from_median(m):
 # Generator
 # ---------------------------
 def gen_frames():
-    global latest_ema_age, sampled_ages, final_median_age, final_age_group, access_allowed, stream_active, camera_error
+    global latest_ema_age, sampled_ages, final_median_age, final_age_group, access_allowed, stream_active, camera_error, recognized_user, latest_embedding
 
     with lock:
         sampled_ages=[]
@@ -192,6 +278,8 @@ def gen_frames():
         access_allowed=False
         stream_active=True
         camera_error=None
+        recognized_user=None
+        latest_embedding=None
 
     cap=cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -204,6 +292,7 @@ def gen_frames():
     last_sample=start
     stable_since=None
     last_ema=None
+    current_embedding=None
 
     while True:
         now=time.time()
@@ -233,6 +322,11 @@ def gen_frames():
 
                 dnn_age=soft_expected_age_from_dnn(face) if USE_DNN else None
                 cnn_age=cnn_regression_age(face) if age_cnn_model else None
+
+                if current_embedding is None:
+                    emb=embed_face(face)
+                    if emb is not None:
+                        current_embedding=emb
 
                 vals=[]; wts=[]
                 if dnn_age is not None:
@@ -285,6 +379,10 @@ def gen_frames():
         final_age_group=None
         access_allowed=False
 
+    # Persist embedding for enrollment and matching
+    latest_embedding = None if current_embedding is None else np.array(current_embedding).tolist()
+    recognized_user = match_user(current_embedding) if current_embedding is not None else None
+
     try:
         cap.release()
     except Exception:
@@ -312,12 +410,46 @@ def status():
         "final_median_age": None if final_median_age is None else float(final_median_age),
         "final_group": final_age_group,
         "access_allowed": access_allowed,
-        "camera_error": camera_error
+        "camera_error": camera_error,
+        "recognized_user": recognized_user,
+        "face_recognition": FACE_REC_AVAILABLE
     })
 
 @app.route('/insta')
 def insta():
     return render_template("insta.html")
+
+
+@app.route('/enroll', methods=['POST'])
+def enroll_user():
+    global recognized_user
+    if not FACE_REC_AVAILABLE:
+        return jsonify({"error": "Face recognition not available on server"}), 501
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    if latest_embedding is None:
+        return jsonify({"error": "No face embedding captured. Please retry."}), 409
+
+    user_id = data.get("user_id") or str(uuid.uuid4())
+    profile = {
+        "name": name,
+        "embedding": latest_embedding
+    }
+
+    with users_lock:
+        users = load_users()
+        users[user_id] = profile
+        try:
+            save_users(users)
+        except Exception as exc:
+            return jsonify({"error": f"failed to save user: {exc}"}), 500
+
+    recognized_user = {"id": user_id, "name": name, "distance": 0.0}
+    return jsonify({"ok": True, "user": recognized_user})
 
 if __name__ == "__main__":
     app.run(debug=True)
