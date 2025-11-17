@@ -1,0 +1,41 @@
+# Age Gate Snapchat Clone
+
+Simple Flask-based camera age gate that combines OpenCV DNN predictions with an optional TensorFlow CNN regressor, plus a dark UI flow for redirecting to Instagram when access is granted.
+
+## Local Setup
+
+```bash
+git clone https://github.com/Hari-Narayana-Rath/axiplat.git
+cd axiplat
+```
+
+Create a virtual environment (replace `python` with `python3` if needed):
+
+```bash
+python -m venv venv
+```
+
+Activate it:
+
+```bash
+# Windows PowerShell
+.\venv\Scripts\Activate.ps1
+
+# macOS/Linux
+source venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Run the App
+
+```bash
+python app.py
+```
+
+Flask runs in debug mode on `http://127.0.0.1:5000/`. Open that URL in a browser, allow camera access, and follow the on-screen instructions. Press `Ctrl+C` in the terminal to stop the server.
+
