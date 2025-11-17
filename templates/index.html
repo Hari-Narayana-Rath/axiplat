@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Age Gate — High Accuracy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: #0b0c10;
+        color: #f4f4f6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+    }
+    .wrap {
+        width: 100%;
+        max-width: 720px;
+        padding: 24px;
+        background: #14171f;
+        border-radius: 16px;
+        border: 1px solid #1f2230;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        text-align: center;
+    }
+    h1 {
+        margin: 0 0 8px;
+        font-size: 1.6rem;
+    }
+    p {
+        margin: 0 0 20px;
+        color: #9ea7c6;
+        font-size: 0.95rem;
+    }
+    #video {
+        width: 100%;
+        border-radius: 12px;
+        background: #000;
+        border: 1px solid #1f2230;
+    }
+    #info {
+        margin-top: 18px;
+        font-size: 1.2rem;
+        font-weight: 500;
+    }
+    #detail {
+        margin-top: 6px;
+        color: #a8b2d9;
+        min-height: 1.2em;
+        font-size: 0.9rem;
+    }
+    .status {
+        display: inline-block;
+        margin-top: 14px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        background: #1f2230;
+        color: #8ac6f2;
+    }
+    .status.error { color: #ff9f9f; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <span class="status" id="status-pill">Initializing</span>
+    <h1>Age Check</h1>
+    <p>Please face the camera head-on. Lighting should be even.</p>
+    <img id="video" src="/video_feed" alt="Live camera stream">
+    <div id="info">Preparing camera…</div>
+    <div id="detail"></div>
+</div>
+
+<script>
+const info = document.getElementById('info');
+const detail = document.getElementById('detail');
+const pill = document.getElementById('status-pill');
+
+let polling = true;
+
+function setPill(isError, text) {
+    pill.textContent = text;
+    pill.classList.toggle('error', Boolean(isError));
+}
+
+async function pollStatus() {
+    try {
+        const r = await fetch('/status');
+        const j = await r.json();
+
+        if (j.camera_error) {
+            setPill(true, 'Camera Error');
+            info.textContent = 'Camera unavailable';
+            detail.textContent = j.camera_error + '. Please confirm it is plugged in and not used by other apps.';
+            polling = false;
+            return;
+        }
+
+        if (j.ema && j.ema > 0) {
+            setPill(false, 'Detecting');
+            info.textContent = `Live estimate: ${j.ema.toFixed(1)} years`;
+            detail.textContent = 'Hold steady for a few more seconds for a final result.';
+        } else if (j.stream_active) {
+            setPill(false, 'Detecting');
+            info.textContent = 'Detecting…';
+            detail.textContent = 'Ensure your whole face is visible and lighting is even.';
+        }
+
+        if (!j.stream_active) {
+            if (j.final_median_age !== null && j.final_group) {
+                const ageText = `${j.final_median_age.toFixed(1)} yrs · ${j.final_group}`;
+                if (j.access_allowed) {
+                    info.textContent = 'Access granted';
+                    detail.textContent = `${ageText}. Redirecting you now…`;
+                    setPill(false, 'Approved');
+                    setTimeout(() => window.location.replace("/insta"), 600);
+                } else {
+                    info.textContent = 'Access denied';
+                    detail.textContent = `${ageText}. You must be at least 14 years old.`;
+                    setPill(true, 'Denied');
+                }
+            } else {
+                info.textContent = 'Could not determine age';
+                detail.textContent = 'Try adjusting lighting and make sure your face remains in frame.';
+                setPill(true, 'No Signal');
+            }
+            polling = false;
+            return;
+        }
+    } catch (e) {
+        console.error(e);
+    }
+
+    if (polling) setTimeout(pollStatus, 600);
+}
+
+pollStatus();
+</script>
+</body>
+</html>

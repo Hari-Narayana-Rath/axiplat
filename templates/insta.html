@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Instagram Redirect</title>
+</head>
+<body style="font-family: Arial; text-align:center; padding-top:40px;">
+
+    <h2>You are eligible!</h2>
+    <p>Redirecting you to Instagram…</p>
+
+    <script>
+        // Redirect directly to Instagram app if installed
+        // If Instagram app is not installed, open Instagram website fallback.
+
+        function openInstagram() {
+            // Try opening Instagram app
+            window.location.href = "instagram://app";
+
+            // After 1 second, fallback to Instagram website (only if the app didn't open)
+            setTimeout(function() {
+                window.location.href = "https://www.instagram.com/";
+            }, 1000);
+        }
+
+        // Run instantly when the page loads
+        openInstagram();
+    </script>
+
+</body>
+</html>
