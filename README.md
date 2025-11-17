@@ -28,12 +28,7 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-> **Note:**  
-> - The `face-recognition` package requires dlib. On Windows install the [Visual C++ build tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and ensure CMake is available; on macOS/Linux make sure you have a working C/C++ toolchain.  
-> - If you cannot build dlib, the app will fall back to an ONNX MobileFaceNet model. Download it once into `model/mobilefacenet.onnx`:
->   ```bash
->   curl -L -o model/mobilefacenet.onnx https://github.com/vladmandic/face-api/raw/master/model/mobilefacenet/model.onnx
->   ```
+
 
 ## Run the App
 
