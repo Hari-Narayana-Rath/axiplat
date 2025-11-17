@@ -1,7 +1,4 @@
-# Age Gate Snapchat Clone
-
-Simple Flask-based camera age gate that combines OpenCV DNN predictions with an optional TensorFlow CNN regressor, plus a dark UI flow for redirecting to Instagram when access is granted.
-
+# AXIPLAT
 ## Local Setup
 
 ```bash
