@@ -39,3 +39,7 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
+# Runtime files
+verification_tokens.json
+*.log
+

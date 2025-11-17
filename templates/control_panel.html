@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Age Gate Server Control Panel</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(135deg, #0b0c10 0%, #1a1d29 100%);
+            color: #f4f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: #14171f;
+            border: 1px solid #1f2230;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        h1 {
+            margin: 0 0 8px;
+            color: #8ac6f2;
+            font-size: 1.8rem;
+        }
+        .subtitle {
+            color: #9ea7c6;
+            margin-bottom: 24px;
+            font-size: 0.95rem;
+        }
+        .status-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+        .status-indicator.online {
+            color: #55efc4;
+        }
+        .status-indicator.offline {
+            color: #ff7675;
+        }
+        .status-indicator::before {
+            content: "";
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-indicator.online::before {
+            background: #55efc4;
+            box-shadow: 0 0 8px #55efc4;
+        }
+        .status-indicator.offline::before {
+            background: #ff7675;
+        }
+        .info-text {
+            color: #9ea7c6;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        .section {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .section-title {
+            color: #8ac6f2;
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+        }
+        .download-btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #6c5ce7;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: background 0.2s;
+            margin: 8px 8px 8px 0;
+        }
+        .download-btn:hover {
+            background: #5a4fcf;
+        }
+        .download-btn.secondary {
+            background: #1f2230;
+        }
+        .download-btn.secondary:hover {
+            background: #2a2d3f;
+        }
+        .instructions {
+            background: rgba(255,255,255,0.03);
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-size: 0.9rem;
+            line-height: 1.8;
+        }
+        .instructions code {
+            background: rgba(0,0,0,0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #55efc4;
+        }
+        .auto-refresh {
+            font-size: 0.85rem;
+            color: #9ea7c6;
+            margin-top: 16px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Age Gate Server</h1>
+        <p class="subtitle">Control Panel & Download Center</p>
+        
+        <div class="status-card">
+            <div id="statusIndicator" class="status-indicator offline">
+                Checking server status...
+            </div>
+            <div id="statusText" class="info-text">Connecting to server...</div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📥 Download Server Launcher</div>
+            <p class="info-text">Download a portable launcher that runs the server in the background (hidden).</p>
+            
+            <a href="/download/start_server_portable.bat" class="download-btn" download>
+                ⬇️ Download Portable Launcher (Recommended)
+            </a>
+            <a href="/download/start_server_hidden_portable.bat" class="download-btn secondary" download>
+                ⬇️ Download Hidden Portable Launcher
+            </a>
+            <a href="/download/start_server.sh" class="download-btn secondary" download>
+                ⬇️ Download Mac/Linux Launcher
+            </a>
+            
+            <div class="instructions">
+                <strong>Portable Launchers:</strong><br>
+                • Can run from anywhere - no need for project folder!<br>
+                • Automatically clones/downloads the project if needed<br>
+                • Sets up everything automatically (venv, dependencies)<br>
+                • Just double-click and it works!<br><br>
+                <strong>First run:</strong> May take a few minutes to download and set up.<br>
+                <strong>Subsequent runs:</strong> Starts instantly.
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">⚙️ Auto-Start on Boot (Optional)</div>
+            <p class="info-text">Make the server start automatically when Windows boots.</p>
+            <a href="/download/setup_autostart.bat" class="download-btn secondary" download>
+                📋 Download Auto-Start Setup
+            </a>
+            <div class="instructions">
+                Run <code>setup_autostart.bat</code> to add the server to Windows startup.<br>
+                The server will run hidden in the background on every boot.
+            </div>
+        </div>
+
+        <div class="auto-refresh">Status updates every 3 seconds</div>
+    </div>
+
+    <script>
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusIndicator.textContent = '✓ Server Online';
+                    statusIndicator.className = 'status-indicator online';
+                    statusText.textContent = `Server is running on localhost:5000. Age gate is active.`;
+                } else {
+                    throw new Error('Server not responding');
+                }
+            } catch (error) {
+                statusIndicator.textContent = '✗ Server Offline';
+                statusIndicator.className = 'status-indicator offline';
+                statusText.textContent = 'Server is not running. Download and run the launcher above to start it.';
+            }
+        }
+
+        // Check immediately and every 3 seconds
+        checkServerStatus();
+        setInterval(checkServerStatus, 3000);
+    </script>
+</body>
+</html>
+

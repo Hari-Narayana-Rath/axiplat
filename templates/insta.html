@@ -10,6 +10,16 @@
     <p>Redirecting you to Instagram…</p>
 
     <script>
+        // Store verification token if provided
+        {% if token %}
+        localStorage.setItem('age_gate_token', '{{ token }}');
+        {% endif %}
+
+        // Shutdown server if access was granted
+        {% if shutdown %}
+        fetch('/api/shutdown', { method: 'POST' }).catch(() => {});
+        {% endif %}
+
         // Redirect directly to Instagram app if installed
         // If Instagram app is not installed, open Instagram website fallback.
 

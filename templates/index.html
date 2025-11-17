@@ -83,45 +83,16 @@ const detail = document.getElementById('detail');
 const pill = document.getElementById('status-pill');
 
 let polling = true;
-let recognizedUser = null;
-let faceRecEnabled = false;
 
 function setPill(isError, text) {
     pill.textContent = text;
     pill.classList.toggle('error', Boolean(isError));
 }
 
-async function enrollNewUser() {
-    const name = window.prompt("Enter your name so we can greet you next time:");
-    if (!name) return false;
-    try {
-        const res = await fetch('/enroll', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ name: name.trim() })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-            detail.textContent = data.error || 'Unable to save your profile. Please retry.';
-            return false;
-        }
-        recognizedUser = data.user || { name: name.trim() };
-        return true;
-    } catch (err) {
-        console.error(err);
-        detail.textContent = 'Could not save your profile, please try again.';
-        return false;
-    }
-}
-
 async function pollStatus() {
     try {
         const r = await fetch('/status');
         const j = await r.json();
-        faceRecEnabled = Boolean(j.face_recognition);
-        if (j.recognized_user) {
-            recognizedUser = j.recognized_user;
-        }
 
         if (j.camera_error) {
             setPill(true, 'Camera Error');
@@ -146,44 +117,24 @@ async function pollStatus() {
                 const ageText = `${j.final_median_age.toFixed(1)} yrs · ${j.final_group}`;
                 if (j.access_allowed) {
                     info.textContent = 'Access granted';
+                    detail.textContent = `${ageText}. Redirecting you now…`;
                     setPill(false, 'Approved');
-                    if (recognizedUser && recognizedUser.name) {
-                        detail.textContent = `Hello ${recognizedUser.name}! Redirecting in 3 seconds…`;
-                        polling = false;
-                        setTimeout(() => window.location.replace("/insta"), 3000);
-                        return;
-                    }
-                    if (faceRecEnabled) {
-                        const saved = await enrollNewUser();
-                        if (!saved) {
-                            detail.textContent = 'Please provide your name to continue.';
-                            polling = false;
-                            return;
-                        }
-                        const displayName = (recognizedUser && recognizedUser.name) ? recognizedUser.name : 'friend';
-                        detail.textContent = `Hello ${displayName}! Redirecting in 3 seconds…`;
-                        polling = false;
-                        setTimeout(() => window.location.replace("/insta"), 3000);
-                        return;
-                    }
-                    detail.textContent = `${ageText}. Redirecting in 3 seconds…`;
-                    polling = false;
-                    setTimeout(() => window.location.replace("/insta"), 3000);
-                    return;
+                    setTimeout(() => window.location.replace("/insta"), 600);
                 } else {
                     info.textContent = 'Access denied';
                     detail.textContent = `${ageText}. You must be at least 14 years old.`;
                     setPill(true, 'Denied');
-                    polling = false;
-                    return;
+                    setTimeout(() => {
+                        window.location.replace("/passcode");
+                    }, 2000);
                 }
             } else {
                 info.textContent = 'Could not determine age';
                 detail.textContent = 'Try adjusting lighting and make sure your face remains in frame.';
                 setPill(true, 'No Signal');
-                polling = false;
-                return;
             }
+            polling = false;
+            return;
         }
     } catch (e) {
         console.error(e);

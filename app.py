@@ -1,15 +1,16 @@
-import json
-import math
 import os
-import re
 import time
-import uuid
+import re
+import math
+import json
 from threading import Lock
 
 import cv2
-import mediapipe as mp
 import numpy as np
-from flask import Flask, render_template, Response, jsonify, request
+from flask import Flask, render_template, Response, jsonify, request, send_file
+from flask_cors import CORS
+
+import mediapipe as mp
 
 # Optional tensorflow for CNN regression (numeric age)
 try:
@@ -18,18 +19,8 @@ try:
 except Exception:
     TF_AVAILABLE = False
 
-# Identity embedding backend
-try:
-    import face_recognition  # type: ignore
-
-    FACE_BACKEND = "dlib"  # dlib encodings
-    FACE_REC_AVAILABLE = True
-except Exception:
-    face_recognition = None
-    FACE_BACKEND = "landmark"  # MediaPipe landmark vector
-    FACE_REC_AVAILABLE = True  # still provide recognition via landmarks
-
 app = Flask(__name__)
+CORS(app)  # Allow extension to call API
 
 # ---------------------------
 # Config (tweak these)
@@ -37,8 +28,6 @@ app = Flask(__name__)
 MODEL_DIR = os.path.join(os.getcwd(), "model")
 AGE_PROTO = os.path.join(MODEL_DIR, "deploy_age.prototxt")
 AGE_CAFFE = os.path.join(MODEL_DIR, "age_net.caffemodel")
-FACE_EMBED_MODEL = os.path.join(MODEL_DIR, "mobilefacenet.onnx")
-USERS_FILE = os.path.join(os.getcwd(), "users.json")
 AGE_LIST = ['(0-2)','(4-6)','(8-12)','(15-20)','(25-32)','(38-43)','(48-53)','(60-100)']
 # Numeric midpoint for each group (used to convert soft outputs to numeric age)
 AGE_MIDPOINTS = [ (int(a.split('(')[1].split('-')[0]) + int(a.split('-')[1].split(')')[0]))/2.0 for a in AGE_LIST ]
@@ -57,34 +46,6 @@ CAMERA_INDEX = 0
 DNN_CONFIDENCE_LOCK = 0.55  # if the top class is confident enough, snap to that age bucket
 CALIBRATION_SCALE = float(os.environ.get("AGE_CALIBRATION_SCALE", "1.0"))
 CALIBRATION_OFFSET = float(os.environ.get("AGE_CALIBRATION_OFFSET", "0.0"))
-
-ONNX_SESSION = None
-if FACE_BACKEND != "dlib":
-    try:
-        import onnxruntime as ort  # type: ignore
-
-        if os.path.isfile(FACE_EMBED_MODEL):
-            ONNX_SESSION = ort.InferenceSession(
-                FACE_EMBED_MODEL,
-                providers=["CPUExecutionProvider"]
-            )
-            FACE_BACKEND = "onnx"
-            print("Loaded MobileFaceNet ONNX embeddings.")
-        else:
-            print("MobileFaceNet ONNX model not found; using landmark fallback.")
-    except Exception as e:
-        print("ONNX Runtime not available:", e)
-        ONNX_SESSION = None
-
-DEFAULT_THRESHOLDS = {
-    "dlib": "0.52",
-    "onnx": "1.0",
-    "landmark": "0.08"
-}
-EMBEDDING_THRESHOLD = float(os.environ.get(
-    "AGE_MATCH_THRESHOLD",
-    DEFAULT_THRESHOLDS.get(FACE_BACKEND, "0.52")
-))
 
 # ---------------------------
 # Load models
@@ -129,7 +90,6 @@ face_mesh = mp_face_mesh.FaceMesh(
 # Camera & state
 # ---------------------------
 lock = Lock()
-users_lock = Lock()
 
 latest_ema_age = None
 sampled_ages = []
@@ -138,121 +98,22 @@ final_age_group = None
 access_allowed = False
 stream_active = False
 camera_error = None
-recognized_user = None
-latest_embedding = None
-# ---------------------------
-# User storage helpers
-# ---------------------------
-def load_users():
-    if not os.path.isfile(USERS_FILE):
-        return {}
+
+# Verification tokens (in-memory, could persist to file)
+verification_tokens = {}  # token -> timestamp
+VERIFICATION_TOKEN_FILE = "verification_tokens.json"
+VERIFICATION_EXPIRY_HOURS = 24
+
+# Passcode for denied access (default: "admin123" - change in production)
+PASSCODE = os.environ.get("AGE_GATE_PASSCODE", "admin123")
+
+# Load existing tokens
+if os.path.isfile(VERIFICATION_TOKEN_FILE):
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    return {}
-
-
-def save_users(users):
-    serializable = {}
-    for uid, entry in users.items():
-        if not isinstance(entry, dict):
-            continue
-        serializable[uid] = {
-            "name": entry.get("name"),
-            "embedding": entry.get("embedding"),
-            "last_age": entry.get("last_age"),
-            "created_at": entry.get("created_at")
-        }
-    tmp = os.path.join(os.path.dirname(USERS_FILE), "_users.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(serializable, f, indent=2)
-    os.replace(tmp, USERS_FILE)
-
-
-def landmark_descriptor(landmarks):
-    coords = []
-    for lm in landmarks.landmark:
-        coords.extend([lm.x, lm.y, lm.z])
-    return np.array(coords, dtype="float32")
-
-
-def embed_face_onnx(face_img):
-    if ONNX_SESSION is None:
-        return None
-    try:
-        img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (112, 112))
-        img = img.astype("float32") / 255.0
-        img = np.transpose(img, (2, 0, 1))
-        img = np.expand_dims(img, axis=0)
-        input_name = ONNX_SESSION.get_inputs()[0].name
-        outputs = ONNX_SESSION.run(None, {input_name: img})
-        emb = outputs[0][0]
-        norm = np.linalg.norm(emb)
-        if norm > 0:
-            emb = emb / norm
-        return emb
-    except Exception:
-        return None
-
-
-def embed_face(face_img, landmarks=None):
-    if FACE_BACKEND == "dlib" and face_recognition is not None:
-        try:
-            rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-            encodings = face_recognition.face_encodings(rgb, num_jitters=1)
-            if encodings:
-                return encodings[0]
-        except Exception:
-            return None
-        return None
-
-    if FACE_BACKEND == "onnx" and ONNX_SESSION is not None:
-        return embed_face_onnx(face_img)
-
-    # Landmark fallback
-    if landmarks is None:
-        return None
-    try:
-        return landmark_descriptor(landmarks)
-    except Exception:
-        return None
-
-
-def match_user(embedding):
-    if embedding is None or not FACE_REC_AVAILABLE:
-        return None
-    try:
-        probe = np.array(embedding)
-    except Exception:
-        return None
-    with users_lock:
-        users = load_users()
-    best_id = None
-    best_name = None
-    best_dist = None
-    for uid, entry in users.items():
-        stored = entry.get("embedding")
-        if not stored:
-            continue
-        try:
-            stored_vec = np.array(stored)
-        except Exception:
-            continue
-        dist = np.linalg.norm(probe - stored_vec)
-        if best_dist is None or dist < best_dist:
-            best_dist = dist
-            best_id = uid
-            best_name = entry.get("name")
-            best_age = entry.get("last_age")
-    if best_id and best_dist is not None and best_dist <= EMBEDDING_THRESHOLD:
-        return {"id": best_id, "name": best_name, "last_age": best_age, "distance": float(best_dist)}
-    return None
-
+        with open(VERIFICATION_TOKEN_FILE, 'r') as f:
+            verification_tokens = json.load(f)
+    except:
+        verification_tokens = {}
 
 # ---------------------------
 # Helpers
@@ -335,11 +196,36 @@ def group_from_median(m):
     idx=int(np.argmin(diffs))
     return AGE_LIST[idx]
 
+def save_verification_tokens():
+    """Save tokens to file"""
+    try:
+        with open(VERIFICATION_TOKEN_FILE, 'w') as f:
+            json.dump(verification_tokens, f)
+    except:
+        pass
+
+def generate_verification_token():
+    """Generate a unique verification token"""
+    import secrets
+    return secrets.token_urlsafe(32)
+
+def is_token_valid(token):
+    """Check if token exists and hasn't expired"""
+    if token not in verification_tokens:
+        return False
+    token_time = verification_tokens[token]
+    age_hours = (time.time() - token_time) / 3600
+    if age_hours > VERIFICATION_EXPIRY_HOURS:
+        del verification_tokens[token]
+        save_verification_tokens()
+        return False
+    return True
+
 # ---------------------------
 # Generator
 # ---------------------------
 def gen_frames():
-    global latest_ema_age, sampled_ages, final_median_age, final_age_group, access_allowed, stream_active, camera_error, recognized_user, latest_embedding
+    global latest_ema_age, sampled_ages, final_median_age, final_age_group, access_allowed, stream_active, camera_error
 
     with lock:
         sampled_ages=[]
@@ -349,8 +235,6 @@ def gen_frames():
         access_allowed=False
         stream_active=True
         camera_error=None
-        recognized_user=None
-        latest_embedding=None
 
     cap=cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -363,7 +247,6 @@ def gen_frames():
     last_sample=start
     stable_since=None
     last_ema=None
-    current_embedding=None
 
     while True:
         now=time.time()
@@ -393,11 +276,6 @@ def gen_frames():
 
                 dnn_age=soft_expected_age_from_dnn(face) if USE_DNN else None
                 cnn_age=cnn_regression_age(face) if age_cnn_model else None
-
-                if current_embedding is None:
-                    emb=embed_face(face, lm)
-                    if emb is not None:
-                        current_embedding=emb
 
                 vals=[]; wts=[]
                 if dnn_age is not None:
@@ -450,10 +328,6 @@ def gen_frames():
         final_age_group=None
         access_allowed=False
 
-    # Persist embedding for enrollment and matching
-    latest_embedding = None if current_embedding is None else np.array(current_embedding).tolist()
-    recognized_user = match_user(current_embedding) if current_embedding is not None else None
-
     try:
         cap.release()
     except Exception:
@@ -481,54 +355,87 @@ def status():
         "final_median_age": None if final_median_age is None else float(final_median_age),
         "final_group": final_age_group,
         "access_allowed": access_allowed,
-        "camera_error": camera_error,
-        "recognized_user": recognized_user,
-        "face_recognition": FACE_REC_AVAILABLE,
-        "face_backend": FACE_BACKEND
+        "camera_error": camera_error
     })
 
 @app.route('/insta')
 def insta():
+    # Generate verification token if access was granted
+    if access_allowed:
+        token = generate_verification_token()
+        verification_tokens[token] = time.time()
+        save_verification_tokens()
+        # Pass token to template and schedule server shutdown
+        return render_template("insta.html", token=token, shutdown=True)
     return render_template("insta.html")
 
+@app.route('/passcode', methods=['GET', 'POST'])
+def passcode():
+    """Passcode entry page for denied access"""
+    if request.method == 'POST':
+        entered = request.form.get('passcode', '')
+        if entered == PASSCODE:
+            # Grant access with passcode
+            token = generate_verification_token()
+            verification_tokens[token] = time.time()
+            save_verification_tokens()
+            return render_template("insta.html", token=token, shutdown=True)
+        else:
+            return render_template("passcode.html", error="Incorrect passcode. Please try again.")
+    return render_template("passcode.html")
 
-@app.route('/enroll', methods=['POST'])
-def enroll_user():
-    global recognized_user
-    if not FACE_REC_AVAILABLE:
-        return jsonify({"error": "Face recognition not available on server"}), 501
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown_server():
+    """API endpoint to shutdown the server"""
+    import threading
+    def shutdown():
+        time.sleep(1)  # Give time for response to be sent
+        func = request.environ.get('werkzeug.server.shutdown')
+        if func is None:
+            raise RuntimeError('Not running with the Werkzeug Server')
+        func()
+    threading.Thread(target=shutdown, daemon=True).start()
+    return jsonify({"status": "Server shutting down..."})
 
-    data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    if not name:
-        return jsonify({"error": "name is required"}), 400
+@app.route('/api/verify_token', methods=['POST'])
+def verify_token():
+    """API endpoint for extension to check if token is valid"""
+    data = request.get_json()
+    token = data.get('token', '') if data else ''
+    if token and is_token_valid(token):
+        return jsonify({"valid": True})
+    return jsonify({"valid": False}), 401
 
-    if latest_embedding is None:
-        return jsonify({"error": "No face embedding captured. Please retry."}), 409
+@app.route('/api/check_verification', methods=['GET'])
+def check_verification():
+    """API endpoint for extension to check verification status"""
+    token = request.args.get('token', '')
+    if token and is_token_valid(token):
+        return jsonify({"verified": True})
+    return jsonify({"verified": False})
 
-    user_id = data.get("user_id") or str(uuid.uuid4())
-    profile = {
-        "name": name,
-        "embedding": latest_embedding,
-        "last_age": None if final_median_age is None else float(final_median_age),
-        "created_at": time.time()
+@app.route('/control')
+def control_panel():
+    """Web app control panel for server management"""
+    return render_template("control_panel.html")
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    """Download endpoint for server launcher files"""
+    allowed_files = {
+        'start_server_hidden.bat': 'start_server_hidden.bat',
+        'start_server_portable.bat': 'start_server_portable.bat',
+        'start_server_hidden_portable.bat': 'start_server_hidden_portable.bat',
+        'start_server.sh': 'start_server.sh',
+        'setup_autostart.bat': 'setup_autostart.bat'
     }
-
-    with users_lock:
-        users = load_users()
-        users[user_id] = profile
-        try:
-            save_users(users)
-        except Exception as exc:
-            return jsonify({"error": f"failed to save user: {exc}"}), 500
-
-    recognized_user = {
-        "id": user_id,
-        "name": name,
-        "last_age": profile["last_age"],
-        "distance": 0.0
-    }
-    return jsonify({"ok": True, "user": recognized_user})
+    
+    if filename in allowed_files:
+        file_path = os.path.join(os.getcwd(), allowed_files[filename])
+        if os.path.isfile(file_path):
+            return send_file(file_path, as_attachment=True, download_name=filename)
+    
+    return jsonify({"error": "File not found"}), 404
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)

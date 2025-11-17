@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Passcode Required</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #0b0c10;
+            color: #f4f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .wrap {
+            width: 100%;
+            max-width: 400px;
+            padding: 32px;
+            background: #14171f;
+            border-radius: 16px;
+            border: 1px solid #1f2230;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 1.6rem;
+            color: #8ac6f2;
+        }
+        p {
+            margin: 0 0 24px;
+            color: #9ea7c6;
+            font-size: 0.95rem;
+        }
+        .error {
+            background: rgba(255, 118, 117, 0.15);
+            border: 1px solid #ff7675;
+            color: #ff7675;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 16px;
+            background: #1f2230;
+            border: 1px solid #2a2d3f;
+            border-radius: 8px;
+            color: #f4f4f6;
+            font-size: 1rem;
+            margin-bottom: 16px;
+        }
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #6c5ce7;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #6c5ce7;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #5a4fcf;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h1>Passcode Required</h1>
+        <p>Access was denied. Please enter the passcode to continue.</p>
+        
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+        
+        <form method="POST" action="/passcode">
+            <input type="password" name="passcode" placeholder="Enter passcode" required autofocus>
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</body>
+</html>
+
