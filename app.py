@@ -12,7 +12,7 @@ from flask_cors import CORS
 
 import mediapipe as mp
 
-# Optional tensorflow for CNN regression (numeric age)
+# TensorFlow regression model loads only when the dependency is present
 try:
     from tensorflow.keras.models import load_model
     TF_AVAILABLE = True
@@ -22,9 +22,7 @@ except Exception:
 app = Flask(__name__)
 CORS(app)  # Allow extension to call API
 
-# ---------------------------
-# Config (tweak these)
-# ---------------------------
+# Base configuration values
 MODEL_DIR = os.path.join(os.getcwd(), "model")
 AGE_PROTO = os.path.join(MODEL_DIR, "deploy_age.prototxt")
 AGE_CAFFE = os.path.join(MODEL_DIR, "age_net.caffemodel")
@@ -32,24 +30,33 @@ AGE_LIST = ['(0-2)','(4-6)','(8-12)','(15-20)','(25-32)','(38-43)','(48-53)','(6
 # Numeric midpoint for each group (used to convert soft outputs to numeric age)
 AGE_MIDPOINTS = [ (int(a.split('(')[1].split('-')[0]) + int(a.split('-')[1].split(')')[0]))/2.0 for a in AGE_LIST ]
 
-# Timing / smoothing
+# Sampling cadence and smoothing behavior
 SAMPLE_INTERVAL = 0.5
 MAX_SECONDS = 10
 STABLE_SECONDS = 3
 STABILITY_THRESH = 1.0
-EMA_ALPHA = 0.4
+EMA_ALPHA = float(os.environ.get("AGE_EMA_ALPHA", "0.3"))
 
-# Fusion weights (DNN vs CNN)
+# Weighting for each model contribution
 DNN_WEIGHT = 0.6
 CNN_WEIGHT = 0.4
 CAMERA_INDEX = 0
 DNN_CONFIDENCE_LOCK = 0.55  # if the top class is confident enough, snap to that age bucket
-CALIBRATION_SCALE = float(os.environ.get("AGE_CALIBRATION_SCALE", "1.0"))
-CALIBRATION_OFFSET = float(os.environ.get("AGE_CALIBRATION_OFFSET", "0.0"))
+CALIBRATION_SCALE = float(os.environ.get("AGE_CALIBRATION_SCALE", "0.9"))
+CALIBRATION_OFFSET = float(os.environ.get("AGE_CALIBRATION_OFFSET", "-2.5"))
 
-# ---------------------------
-# Load models
-# ---------------------------
+# Adaptive normalization / brightness compensation
+DEFAULT_BLOB_MEAN = (
+    78.4263377603,
+    87.7689143744,
+    114.895847746
+)
+DYNAMIC_MEAN_BLEND = float(os.environ.get("AGE_DYNAMIC_MEAN_BLEND", "0.35"))
+BRIGHTNESS_REFERENCE = float(os.environ.get("AGE_BRIGHTNESS_REFERENCE", "132.0"))
+BRIGHTNESS_CORRECTION = float(os.environ.get("AGE_BRIGHTNESS_CORRECTION", "0.018"))
+BRIGHTNESS_CORRECTION_CLAMP = float(os.environ.get("AGE_BRIGHTNESS_CLAMP", "6.0"))
+
+# Model loading
 USE_DNN = False
 age_net = None
 if os.path.isfile(AGE_PROTO) and os.path.isfile(AGE_CAFFE):
@@ -74,9 +81,7 @@ if TF_AVAILABLE:
 else:
     print("TensorFlow not available; CNN regression disabled.")
 
-# ---------------------------
-# MediaPipe
-# ---------------------------
+# Face landmark detector
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=False,
@@ -86,9 +91,7 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5
 )
 
-# ---------------------------
-# Camera & state
-# ---------------------------
+# Shared state between streaming and endpoints
 lock = Lock()
 
 latest_ema_age = None
@@ -99,12 +102,12 @@ access_allowed = False
 stream_active = False
 camera_error = None
 
-# Verification tokens (in-memory, could persist to file)
+# Verification tokens stored in memory (persisted to json between runs)
 verification_tokens = {}  # token -> timestamp
 VERIFICATION_TOKEN_FILE = "verification_tokens.json"
 VERIFICATION_EXPIRY_HOURS = 24
 
-# Passcode for denied access (default: "admin123" - change in production)
+# Default fallback passcode (override via env)
 PASSCODE = os.environ.get("AGE_GATE_PASSCODE", "admin123")
 
 # Load existing tokens
@@ -115,16 +118,36 @@ if os.path.isfile(VERIFICATION_TOKEN_FILE):
     except:
         verification_tokens = {}
 
-# ---------------------------
-# Helpers
-# ---------------------------
+# Helper routines
+def adaptive_blob_mean(face_img):
+    """Blend default mean subtraction with current frame stats."""
+    if face_img is None or DYNAMIC_MEAN_BLEND <= 0:
+        return DEFAULT_BLOB_MEAN
+    b_mean, g_mean, r_mean, _ = cv2.mean(face_img)
+    blended = []
+    for default_val, current_val in zip(DEFAULT_BLOB_MEAN, (b_mean, g_mean, r_mean)):
+        blended.append((1.0 - DYNAMIC_MEAN_BLEND) * default_val + DYNAMIC_MEAN_BLEND * current_val)
+    return tuple(blended)
+
+
+def brightness_age_adjust(face_img):
+    """Convert overall frame brightness into a gentle age correction."""
+    if face_img is None or BRIGHTNESS_CORRECTION == 0:
+        return 0.0
+    gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+    delta = BRIGHTNESS_REFERENCE - float(np.mean(gray))
+    adjustment = delta * BRIGHTNESS_CORRECTION
+    return float(np.clip(adjustment, -BRIGHTNESS_CORRECTION_CLAMP, BRIGHTNESS_CORRECTION_CLAMP))
+
+
 def soft_expected_age_from_dnn(face_img):
     if age_net is None:
         return None
     try:
+        mean_vals = adaptive_blob_mean(face_img)
         blob = cv2.dnn.blobFromImage(
             face_img, 1.0, (227,227),
-            (78.4263377603, 87.7689143744, 114.895847746),
+            mean_vals,
             swapRB=False
         )
         age_net.setInput(blob)
@@ -140,6 +163,7 @@ def soft_expected_age_from_dnn(face_img):
 
         raw_age = discrete_age if top_prob >= DNN_CONFIDENCE_LOCK else expected
         calibrated = CALIBRATION_SCALE * raw_age + CALIBRATION_OFFSET
+        calibrated += brightness_age_adjust(face_img)
         return float(calibrated)
     except:
         return None
@@ -221,9 +245,7 @@ def is_token_valid(token):
         return False
     return True
 
-# ---------------------------
-# Generator
-# ---------------------------
+# Frame generator for the MJPEG stream
 def gen_frames():
     global latest_ema_age, sampled_ages, final_median_age, final_age_group, access_allowed, stream_active, camera_error
 
@@ -336,9 +358,7 @@ def gen_frames():
     stream_active=False
     return
 
-# ---------------------------
-# Routes
-# ---------------------------
+# HTTP routes
 @app.route('/')
 def index():
     return render_template("index.html")
@@ -388,13 +408,20 @@ def passcode():
 def shutdown_server():
     """API endpoint to shutdown the server"""
     import threading
-    def shutdown():
+
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func is None:
+        def hard_exit():
+            time.sleep(1)
+            os._exit(0)
+        threading.Thread(target=hard_exit, daemon=True).start()
+        return jsonify({"status": "Server shutting down... (forced)"}), 202
+
+    def shutdown(target):
         time.sleep(1)  # Give time for response to be sent
-        func = request.environ.get('werkzeug.server.shutdown')
-        if func is None:
-            raise RuntimeError('Not running with the Werkzeug Server')
-        func()
-    threading.Thread(target=shutdown, daemon=True).start()
+        target()
+
+    threading.Thread(target=shutdown, args=(func,), daemon=True).start()
     return jsonify({"status": "Server shutting down..."})
 
 @app.route('/api/verify_token', methods=['POST'])

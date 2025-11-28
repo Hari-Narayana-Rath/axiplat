@@ -1,17 +1,14 @@
 @echo off
-REM Age Gate Server - Auto-Start Setup
-REM This script adds the server to Windows startup
+REM Adds the server launcher to Windows startup
 
 echo ========================================
 echo Age Gate Server - Auto-Start Setup
 echo ========================================
 echo.
 
-REM Get the directory where this batch file is located
 set "SCRIPT_DIR=%~dp0"
 set "BAT_FILE=%SCRIPT_DIR%start_server_hidden.bat"
 
-REM Check if the launcher exists
 if not exist "%BAT_FILE%" (
     echo ERROR: start_server_hidden.bat not found in:
     echo %SCRIPT_DIR%
@@ -21,18 +18,15 @@ if not exist "%BAT_FILE%" (
     exit /b 1
 )
 
-REM Create a VBS script that runs the batch file hidden
 set "VBS_FILE=%SCRIPT_DIR%run_server_hidden.vbs"
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
 echo WshShell.Run """%BAT_FILE%""", 0, False
 ) > "%VBS_FILE%"
 
-REM Add to Windows startup folder
 set "STARTUP_FOLDER=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "STARTUP_LINK=%STARTUP_FOLDER%\Age Gate Server.lnk"
 
-REM Create shortcut in startup folder
 powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%STARTUP_LINK%'); $s.TargetPath = '%VBS_FILE%'; $s.WorkingDirectory = '%SCRIPT_DIR%'; $s.Save()"
 
 if exist "%STARTUP_LINK%" (

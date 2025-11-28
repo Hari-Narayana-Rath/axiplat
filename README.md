@@ -1,6 +1,6 @@
-# Age Gate Snapchat Clone
+# AXIPLAT
 
-Simple Flask-based camera age gate that combines OpenCV DNN predictions with an optional TensorFlow CNN regressor, plus a dark UI flow for redirecting to Instagram when access is granted.
+AXIPLAT is a Flask-based camera age verification stack that fuses OpenCV DNN predictions with an optional TensorFlow CNN regressor, plus a dark UI flow for redirecting to Instagram when access is granted.
 
 ## Local Setup
 
@@ -41,7 +41,7 @@ Flask runs in debug mode on `http://127.0.0.1:5000/`. Open that URL in a browser
 
 ## Browser Extension (Optional)
 
-The project includes a Chrome/Edge/Brave browser extension that automatically intercepts Instagram navigation and redirects to the age gate if the user hasn't been verified.
+The project includes a Chrome/Edge/Brave browser extension that automatically intercepts Instagram navigation and redirects to AXIPLAT if the user hasn't been verified.
 
 ### Setup Extension
 
@@ -67,7 +67,7 @@ The extension now automatically detects if the server is running and provides ea
 ### How It Works
 
 - When a user tries to visit Instagram, the extension checks for a valid verification token
-- If not verified, they're redirected to the age gate (`localhost:5000`)
+- If not verified, they're redirected to AXIPLAT (`localhost:5000`)
 - After successful age verification, a token is stored (valid for 24 hours)
 - Instagram access is only allowed with a valid token
 - Extension automatically detects when server starts/stops

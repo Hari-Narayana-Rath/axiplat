@@ -1,4 +1,4 @@
-// Popup script
+// Popup keeps the user informed about verification and server state
 const GATE_URL = 'http://localhost:5000';
 
 async function checkServerStatus() {
@@ -69,7 +69,6 @@ document.getElementById('verifyBtn').addEventListener('click', () => {
 });
 
 document.getElementById('startServerBtn').addEventListener('click', async () => {
-  // Redirect to GitHub launcher repository
   chrome.tabs.create({ url: 'https://github.com/Hari-Narayana-Rath/axiplat-server' });
   window.close();
 });
@@ -83,7 +82,6 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   }
 });
 
-// Check status on load and periodically
-checkStatus();
-setInterval(checkStatus, 5000); // Check every 5 seconds
+checkStatus(); // prime UI on load
+setInterval(checkStatus, 5000); // refresh every 5 seconds
 

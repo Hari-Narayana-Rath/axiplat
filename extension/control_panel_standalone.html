@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Age Gate Server Control Panel</title>
+    <title>AXIPLAT Server Control Panel</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -128,7 +128,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Age Gate Server</h1>
+        <h1>🚀 AXIPLAT Server</h1>
         <p class="subtitle">Control Panel & Download Center</p>
         
         <div class="status-card">
@@ -139,7 +139,7 @@
         </div>
 
         <div class="section">
-            <div class="section-title">📥 Download Server Launcher</div>
+            <div class="section-title">📥 Download AXIPLAT Launcher</div>
             <p class="info-text">Download a portable launcher that runs the server in the background (hidden).</p>
             
             <button class="download-btn" onclick="downloadFile('start_server_portable.bat'); return false;">
@@ -211,7 +211,7 @@
             }
         }
 
-        // Embedded file contents (works even when server is offline)
+        // Launcher scripts live inline so downloads work even when offline
         const fileContents = {
             'start_server_portable.bat': `@echo off
 REM Age Gate Server - Portable Standalone Launcher
@@ -457,7 +457,6 @@ exit /b 0
             try {
                 console.log('Download requested:', filename);
                 
-                // Use embedded file content (works offline)
                 if (!fileContents[filename]) {
                     alert(`File ${filename} not available.\n\nPlease start the server first or clone from GitHub:\ngit clone https://github.com/Hari-Narayana-Rath/axiplat.git`);
                     return;
@@ -466,7 +465,6 @@ exit /b 0
                 const content = fileContents[filename];
                 console.log('File content length:', content.length);
                 
-                // Try Chrome downloads API first (if available)
                 if (typeof chrome !== 'undefined' && chrome.downloads) {
                     try {
                         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -486,31 +484,25 @@ exit /b 0
                     }
                 }
                 
-                // Fallback: Create blob and download link
                 const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
                 const downloadUrl = window.URL.createObjectURL(blob);
                 
-                // Create download link
                 const a = document.createElement('a');
                 a.href = downloadUrl;
                 a.download = filename;
                 a.style.display = 'none';
                 a.setAttribute('download', filename);
                 
-                // Add to body and click
                 document.body.appendChild(a);
                 
-                // Trigger download
                 a.click();
                 
-                // Cleanup
                 setTimeout(() => {
                     document.body.removeChild(a);
                     window.URL.revokeObjectURL(downloadUrl);
                     console.log('Download completed:', filename);
                 }, 100);
                 
-                // Show success message
                 setTimeout(() => {
                     alert(`✓ Downloaded ${filename}!\n\nPlace it anywhere and double-click to start the server.\n\nIf download didn't work, try the "Copy to Clipboard" button instead.`);
                 }, 300);
@@ -521,7 +513,6 @@ exit /b 0
             }
         }
         
-        // Copy to clipboard as alternative
         function copyToClipboard(filename) {
             try {
                 if (!fileContents[filename]) {
@@ -532,7 +523,6 @@ exit /b 0
                 navigator.clipboard.writeText(fileContents[filename]).then(() => {
                     alert(`✓ Copied ${filename} to clipboard!\n\nNow:\n1. Open Notepad\n2. Paste (Ctrl+V)\n3. Save as ${filename}\n4. Double-click to run`);
                 }).catch(err => {
-                    // Fallback for older browsers
                     const textarea = document.createElement('textarea');
                     textarea.value = fileContents[filename];
                     textarea.style.position = 'fixed';
@@ -548,13 +538,11 @@ exit /b 0
             }
         }
         
-        // Make functions globally accessible
         window.downloadFile = downloadFile;
         window.copyToClipboard = copyToClipboard;
 
-        // Check immediately and every 3 seconds
-        checkServerStatus();
-        setInterval(checkServerStatus, 3000);
+        checkServerStatus(); // paint initial state
+        setInterval(checkServerStatus, 3000); // refresh UI frequently
     </script>
 </body>
 </html>

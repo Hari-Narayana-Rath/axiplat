@@ -1,6 +1,6 @@
-# Age Gate Browser Extension
+# AXIPLAT Browser Extension
 
-This Chrome/Edge extension automatically intercepts Instagram navigation and redirects users to the age gate verification page if they haven't been verified.
+This Chrome/Edge extension automatically intercepts Instagram navigation and redirects users to the AXIPLAT verification page if they haven't been verified.
 
 ## Installation
 
@@ -13,7 +13,7 @@ This Chrome/Edge extension automatically intercepts Instagram navigation and red
 ## How It Works
 
 - When a user tries to visit Instagram, the extension checks if they have a valid verification token
-- If not verified, they are redirected to `http://localhost:5000` (the Flask age gate)
+- If not verified, they are redirected to `http://localhost:5000` (the AXIPLAT Flask app)
 - After successful verification, a token is stored in browser storage
 - The token is valid for 24 hours
 - Instagram access is allowed only with a valid token

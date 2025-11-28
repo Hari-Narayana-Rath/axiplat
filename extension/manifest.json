@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Age Gate for Instagram",
+  "name": "AXIPLAT for Instagram",
   "version": "1.0.0",
   "description": "Automatically verifies age before allowing access to Instagram",
   "permissions": [

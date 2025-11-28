@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Age Gate — High Accuracy</title>
+<title>AXIPLAT — High Accuracy</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
     * { box-sizing: border-box; }
@@ -115,7 +115,7 @@ async function pollStatus() {
         if (!j.stream_active) {
             if (j.final_median_age !== null && j.final_group) {
                 const ageText = `${j.final_median_age.toFixed(1)} yrs · ${j.final_group}`;
-                if (j.access_allowed) {
+            if (j.access_allowed) {
                     info.textContent = 'Access granted';
                     detail.textContent = `${ageText}. Redirecting you now…`;
                     setPill(false, 'Approved');
@@ -124,7 +124,7 @@ async function pollStatus() {
                     info.textContent = 'Access denied';
                     detail.textContent = `${ageText}. You must be at least 14 years old.`;
                     setPill(true, 'Denied');
-                    setTimeout(() => {
+                setTimeout(() => {
                         window.location.replace("/passcode");
                     }, 2000);
                 }

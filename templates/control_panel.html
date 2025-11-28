@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Age Gate Server Control Panel</title>
+    <title>AXIPLAT Server Control Panel</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -131,7 +131,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Age Gate Server</h1>
+        <h1>🚀 AXIPLAT Server</h1>
         <p class="subtitle">Control Panel & Download Center</p>
         
         <div class="status-card">
@@ -193,7 +193,7 @@
                 if (response.ok) {
                     statusIndicator.textContent = '✓ Server Online';
                     statusIndicator.className = 'status-indicator online';
-                    statusText.textContent = `Server is running on localhost:5000. Age gate is active.`;
+                    statusText.textContent = `Server is running on localhost:5000. AXIPLAT is active.`;
                 } else {
                     throw new Error('Server not responding');
                 }
@@ -204,9 +204,8 @@
             }
         }
 
-        // Check immediately and every 3 seconds
-        checkServerStatus();
-        setInterval(checkServerStatus, 3000);
+        checkServerStatus(); // paint initial state
+        setInterval(checkServerStatus, 3000); // refresh UI frequently
     </script>
 </body>
 </html>
