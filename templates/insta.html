@@ -14,10 +14,6 @@
         localStorage.setItem('age_gate_token', '{{ token }}');
         {% endif %}
 
-        {% if shutdown %}
-        fetch('/api/shutdown', { method: 'POST' }).catch(() => {});
-        {% endif %}
-
         function openInstagram() {
             // native app first
             window.location.href = "instagram://app";

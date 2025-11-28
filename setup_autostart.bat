@@ -2,7 +2,7 @@
 REM Adds the server launcher to Windows startup
 
 echo ========================================
-echo Age Gate Server - Auto-Start Setup
+echo AXIPLAT Server - Auto-Start Setup
 echo ========================================
 echo.
 
@@ -25,13 +25,13 @@ echo WshShell.Run """%BAT_FILE%""", 0, False
 ) > "%VBS_FILE%"
 
 set "STARTUP_FOLDER=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-set "STARTUP_LINK=%STARTUP_FOLDER%\Age Gate Server.lnk"
+set "STARTUP_LINK=%STARTUP_FOLDER%\AXIPLAT Server.lnk"
 
 powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%STARTUP_LINK%'); $s.TargetPath = '%VBS_FILE%'; $s.WorkingDirectory = '%SCRIPT_DIR%'; $s.Save()"
 
 if exist "%STARTUP_LINK%" (
     echo.
-    echo ✓ Success! Age Gate Server has been added to Windows startup.
+    echo ✓ Success! AXIPLAT Server has been added to Windows startup.
     echo.
     echo The server will now start automatically when you boot Windows.
     echo It will run hidden in the background.

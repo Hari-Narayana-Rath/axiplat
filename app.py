@@ -109,6 +109,8 @@ VERIFICATION_EXPIRY_HOURS = 24
 
 # Default fallback passcode (override via env)
 PASSCODE = os.environ.get("AGE_GATE_PASSCODE", "admin123")
+REMOTE_SHUTDOWN_ENABLED = os.environ.get("AXIPLAT_ENABLE_REMOTE_SHUTDOWN", "0").lower() in ("1","true","yes")
+SHUTDOWN_SECRET = os.environ.get("AXIPLAT_SHUTDOWN_SECRET", PASSCODE)
 
 # Load existing tokens
 if os.path.isfile(VERIFICATION_TOKEN_FILE):
@@ -385,8 +387,7 @@ def insta():
         token = generate_verification_token()
         verification_tokens[token] = time.time()
         save_verification_tokens()
-        # Pass token to template and schedule server shutdown
-        return render_template("insta.html", token=token, shutdown=True)
+        return render_template("insta.html", token=token)
     return render_template("insta.html")
 
 @app.route('/passcode', methods=['GET', 'POST'])
@@ -399,7 +400,7 @@ def passcode():
             token = generate_verification_token()
             verification_tokens[token] = time.time()
             save_verification_tokens()
-            return render_template("insta.html", token=token, shutdown=True)
+            return render_template("insta.html", token=token)
         else:
             return render_template("passcode.html", error="Incorrect passcode. Please try again.")
     return render_template("passcode.html")
@@ -408,6 +409,14 @@ def passcode():
 def shutdown_server():
     """API endpoint to shutdown the server"""
     import threading
+
+    if not REMOTE_SHUTDOWN_ENABLED:
+        return jsonify({"status": "disabled"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    provided_secret = payload.get("secret") or request.headers.get("X-AXIPLAT-SHUTDOWN")
+    if SHUTDOWN_SECRET and provided_secret != SHUTDOWN_SECRET:
+        return jsonify({"status": "unauthorized"}), 401
 
     func = request.environ.get('werkzeug.server.shutdown')
     if func is None:
