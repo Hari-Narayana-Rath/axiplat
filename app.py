@@ -407,31 +407,13 @@ def passcode():
 
 @app.route('/api/shutdown', methods=['POST'])
 def shutdown_server():
-    """API endpoint to shutdown the server"""
-    import threading
-
-    if not REMOTE_SHUTDOWN_ENABLED:
-        return jsonify({"status": "disabled"}), 403
-
-    payload = request.get_json(silent=True) or {}
-    provided_secret = payload.get("secret") or request.headers.get("X-AXIPLAT-SHUTDOWN")
-    if SHUTDOWN_SECRET and provided_secret != SHUTDOWN_SECRET:
-        return jsonify({"status": "unauthorized"}), 401
-
-    func = request.environ.get('werkzeug.server.shutdown')
-    if func is None:
-        def hard_exit():
-            time.sleep(1)
-            os._exit(0)
-        threading.Thread(target=hard_exit, daemon=True).start()
-        return jsonify({"status": "Server shutting down... (forced)"}), 202
-
-    def shutdown(target):
-        time.sleep(1)  # Give time for response to be sent
-        target()
-
-    threading.Thread(target=shutdown, args=(func,), daemon=True).start()
-    return jsonify({"status": "Server shutting down..."})
+    """API endpoint to shutdown the server - DISABLED to keep server online"""
+    # Shutdown endpoint is disabled to keep server running even after access is granted
+    # This ensures the server stays online for continuous use
+    return jsonify({
+        "status": "disabled", 
+        "message": "Server shutdown is disabled. Server will remain online for continuous access verification."
+    }), 200
 
 @app.route('/api/verify_token', methods=['POST'])
 def verify_token():
